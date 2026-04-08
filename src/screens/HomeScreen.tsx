@@ -193,7 +193,7 @@ export default function HomeScreen({ navigation, user, onLogout }: Props) {
       )}
 
       {/* Maßbänder */}
-      {loaded && hasStartedDiktat && (
+      {loaded && (
         <View style={{ marginBottom: 12 }}>
           <LernMassband
             percent={diktatStats.overallPercent}
@@ -203,7 +203,7 @@ export default function HomeScreen({ navigation, user, onLogout }: Props) {
           />
         </View>
       )}
-      {loaded && hasStartedMathe && (
+      {loaded && (
         <View style={{ marginBottom: 12 }}>
           <LernMassband
             percent={matheStats.overallPercent}
