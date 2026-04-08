@@ -186,6 +186,11 @@ export default function PracticeScreen({ navigation, route }: Props) {
     }
   };
 
+  const handleClose = () => {
+    stopCurrentAudio();
+    navigation.goBack();
+  };
+
   const handleTakePhoto = async () => {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
@@ -315,6 +320,10 @@ export default function PracticeScreen({ navigation, route }: Props) {
 
     return (
       <View style={styles.center}>
+        <TouchableOpacity style={styles.closeButtonTopRight} onPress={handleClose}>
+          <Text style={styles.closeButtonText}>✕</Text>
+        </TouchableOpacity>
+
         <StepIndicator currentPhase="ready" />
 
         <View style={[styles.readyIcon, isMath ? styles.readyIconMath : styles.readyIconDiktat]}>
@@ -340,10 +349,6 @@ export default function PracticeScreen({ navigation, route }: Props) {
         <TouchableOpacity style={styles.startButton} onPress={handleStart}>
           <Text style={styles.startButtonText}>Los geht's!</Text>
         </TouchableOpacity>
-
-        <TouchableOpacity style={styles.backLink} onPress={() => navigation.goBack()}>
-          <Text style={styles.backLinkText}>{'‹'}</Text>
-        </TouchableOpacity>
       </View>
     );
   }
@@ -361,7 +366,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
           <StepIndicator currentPhase="dictating" />
 
           {/* Close button */}
-          <TouchableOpacity style={styles.closeButton} onPress={() => navigation.goBack()}>
+          <TouchableOpacity style={styles.closeButtonTopRight} onPress={handleClose}>
             <Text style={styles.closeButtonText}>✕</Text>
           </TouchableOpacity>
 
@@ -440,7 +445,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
       <ScrollView style={styles.photoScroll} contentContainerStyle={styles.photoContainer}>
         <StepIndicator currentPhase="photo" />
 
-        <TouchableOpacity style={styles.closeButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.closeButtonTopRight} onPress={handleClose}>
           <Text style={styles.closeButtonText}>✕</Text>
         </TouchableOpacity>
 
@@ -622,26 +627,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#fff',
   },
-  backLink: {
-    marginTop: 16,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  backLinkText: {
-    fontSize: 24,
-    color: '#9ca3af',
-    fontWeight: '600',
-    marginTop: -2,
-  },
 
   // === DICTATING ===
   dictatingContainer: {
@@ -655,10 +640,10 @@ const styles = StyleSheet.create({
   dictatingTop: {
     width: '100%',
   },
-  closeButton: {
+  closeButtonTopRight: {
     position: 'absolute',
-    top: 0,
-    right: 0,
+    top: 48,
+    right: 20,
     width: 40,
     height: 40,
     borderRadius: 20,
@@ -668,9 +653,9 @@ const styles = StyleSheet.create({
     zIndex: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    elevation: 2,
   },
   closeButtonText: {
     fontSize: 16,
