@@ -7,6 +7,7 @@ import {
   FlatList,
   RefreshControl,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Dictation, DictationSession, ProgressEntry } from '../types';
@@ -36,6 +37,7 @@ export default function HomeScreen({ navigation, user, onLogout }: Props) {
   const [progress, setProgress] = useState<ProgressEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [showKids, setShowKids] = useState(false);
 
   const loadData = useCallback(async () => {
     const [d, s, p] = await Promise.all([
@@ -65,29 +67,66 @@ export default function HomeScreen({ navigation, user, onLogout }: Props) {
   };
 
   const streak = calculateStreak(progress);
-  const diktatCount = getTodayPracticeCount(progress, 'diktat');
-  const matheCount = getTodayPracticeCount(progress, 'mathe');
+  const todayCount = getTodayPracticeCount(progress);
+  const todayDiktat = getTodayPracticeCount(progress, 'diktat');
+  const todayMathe = getTodayPracticeCount(progress, 'mathe');
   const diktatStats = calculateOverallStats(progress, 'diktat');
   const matheStats = calculateOverallStats(progress, 'mathe');
+  const hasStartedDiktat = diktatStats.totalWords > 0;
+  const hasStartedMathe = matheStats.totalWords > 0;
+  const hasStarted = hasStartedDiktat || hasStartedMathe;
 
-  const diktatList = dictations.filter(d => d.type !== 'mathe');
-  const matheList = dictations.filter(d => d.type === 'mathe');
-
-  if (!loaded) {
+  // === MAIN SCREEN (choose mode) ===
+  if (!showKids) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#f59e0b" />
+      <View style={styles.mainContainer}>
+        <View style={styles.mainContent}>
+          {/* User avatar */}
+          <View style={styles.avatarWrap}>
+            <Text style={styles.avatarText}>{user.icon}</Text>
+          </View>
+          <Text style={styles.mainGreeting}>
+            {getGreeting()}, {user.name}!
+          </Text>
+          <Text style={styles.mainSub}>Was möchtest du machen?</Text>
+
+          {/* Big practice button */}
+          <TouchableOpacity
+            style={styles.bigButton}
+            onPress={() => setShowKids(true)}
+            activeOpacity={0.9}
+          >
+            <Text style={styles.bigButtonEmoji}>📝</Text>
+            <Text style={styles.bigButtonText}>Übung starten</Text>
+          </TouchableOpacity>
+
+          {/* Parent area button */}
+          <TouchableOpacity
+            style={styles.parentButton}
+            onPress={() => navigation.navigate('Parent')}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.parentButtonEmoji}>⚙️</Text>
+            <Text style={styles.parentButtonText}>Elternbereich</Text>
+          </TouchableOpacity>
+
+          {/* Logout */}
+          <TouchableOpacity onPress={handleLogout} style={styles.logoutLink}>
+            <Text style={styles.logoutText}>Abmelden</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
 
+  // === KID MODE ===
   const renderDictation = ({ item }: { item: Dictation }) => {
     const isMath = item.type === 'mathe';
     return (
       <TouchableOpacity
         style={styles.card}
         onPress={() => navigation.navigate('Practice', { id: item.id })}
-        activeOpacity={0.7}
+        activeOpacity={0.8}
       >
         <View style={styles.cardRow}>
           <View style={[styles.cardIcon, isMath ? styles.cardIconMath : styles.cardIconDiktat]}>
@@ -99,7 +138,9 @@ export default function HomeScreen({ navigation, user, onLogout }: Props) {
               {item.sentences.length} {isMath ? 'Aufgaben' : 'Sätze'}
             </Text>
           </View>
-          <Text style={styles.chevron}>›</Text>
+          <View style={styles.cardChevronWrap}>
+            <Text style={styles.cardChevron}>›</Text>
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -107,83 +148,106 @@ export default function HomeScreen({ navigation, user, onLogout }: Props) {
 
   const ListHeader = () => (
     <View>
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>{getGreeting()},</Text>
-          <Text style={styles.userName}>{user.name} {user.icon}</Text>
-        </View>
-        <View style={styles.headerButtons}>
-          <TouchableOpacity onPress={() => navigation.navigate('Parent')} style={styles.parentButton}>
-            <Text style={styles.parentButtonText}>Eltern</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-            <Text style={styles.logoutText}>Abmelden</Text>
+      {/* Top bar */}
+      <View style={styles.topBar}>
+        <TouchableOpacity onPress={() => setShowKids(false)} style={styles.backButton}>
+          <Text style={styles.backButtonText}>‹</Text>
+        </TouchableOpacity>
+        <View style={styles.topBarRight}>
+          {loaded && hasStarted && (
+            <View style={styles.percentBadge}>
+              {hasStartedDiktat && (
+                <Text style={styles.percentDiktat}>📖{diktatStats.overallPercent}%</Text>
+              )}
+              {hasStartedDiktat && hasStartedMathe && (
+                <Text style={styles.percentDivider}>|</Text>
+              )}
+              {hasStartedMathe && (
+                <Text style={styles.percentMathe}>🔢{matheStats.overallPercent}%</Text>
+              )}
+            </View>
+          )}
+          <TouchableOpacity onPress={handleLogout} style={styles.backButton}>
+            <Text style={styles.logoutIcon}>↗</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Stats Row */}
-      <View style={styles.statsRow}>
-        <View style={styles.statCard}>
-          <Text style={styles.statEmoji}>🔥</Text>
-          <Text style={styles.statValue}>{streak}</Text>
-          <Text style={styles.statLabel}>Tage</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statEmoji}>📖</Text>
-          <Text style={styles.statValue}>{diktatStats.overallPercent}%</Text>
-          <Text style={styles.statLabel}>Diktat</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statEmoji}>🔢</Text>
-          <Text style={styles.statValue}>{matheStats.overallPercent}%</Text>
-          <Text style={styles.statLabel}>Mathe</Text>
-        </View>
+      {/* Greeting */}
+      <View style={styles.greetingSection}>
+        <Text style={styles.greetingTitle}>
+          {getGreeting()}, {user.name}! 👋
+        </Text>
+        <Text style={styles.greetingSub}>
+          {todayCount > 0
+            ? `Heute schon ${todayCount} ${todayCount === 1 ? 'Übung' : 'Übungen'} gemacht!`
+            : 'Bereit zum Üben?'}
+        </Text>
       </View>
 
       {/* Daily Goal */}
-      <View style={{ marginBottom: 24 }}>
-        <DailyGoal diktatCount={diktatCount} matheCount={matheCount} />
-      </View>
+      {loaded && (
+        <View style={{ marginBottom: 16 }}>
+          <DailyGoal diktatCount={todayDiktat} matheCount={todayMathe} />
+        </View>
+      )}
 
       {/* Maßbänder */}
-      {diktatStats.totalWords > 0 && (
-        <View style={{ marginBottom: 16 }}>
+      {loaded && hasStartedDiktat && (
+        <View style={{ marginBottom: 12 }}>
           <LernMassband
-            ranks={diktatStats.allRanks}
-            currentPercent={diktatStats.overallPercent}
-            label="Diktat-Maßband"
+            percent={diktatStats.overallPercent}
+            allRanks={diktatStats.allRanks}
+            currentRank={diktatStats.currentRank}
+            label="Diktat"
           />
         </View>
       )}
-      {matheStats.totalWords > 0 && (
-        <View style={{ marginBottom: 24 }}>
+      {loaded && hasStartedMathe && (
+        <View style={{ marginBottom: 12 }}>
           <LernMassband
-            ranks={matheStats.allRanks}
-            currentPercent={matheStats.overallPercent}
-            label="Mathe-Maßband"
+            percent={matheStats.overallPercent}
+            allRanks={matheStats.allRanks}
+            currentRank={matheStats.currentRank}
+            label="Mathe"
           />
         </View>
       )}
 
-      {/* Diktat Section */}
-      {diktatList.length > 0 && (
-        <Text style={styles.sectionTitle}>Diktate</Text>
+      {/* Streak */}
+      {loaded && hasStarted && streak > 0 && (
+        <Text style={styles.streakText}>🔥 {streak} {streak === 1 ? 'Tag' : 'Tage'} in Folge</Text>
+      )}
+
+      {/* Section title */}
+      <Text style={styles.sectionTitle}>Übungen</Text>
+
+      {dictations.length === 0 && loaded && (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyEmoji}>📭</Text>
+          <Text style={styles.emptyTitle}>Noch keine Übungen da.</Text>
+          <Text style={styles.emptySub}>Bitte einen Erwachsenen, ein Diktat anzulegen.</Text>
+        </View>
       )}
     </View>
   );
 
-  const allItems = [...diktatList, ...(matheList.length > 0 ? [{ id: '__mathe_header__' } as Dictation] : []), ...matheList];
+  if (!loaded) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#f59e0b" />
+      </View>
+    );
+  }
 
   return (
     <FlatList
-      style={styles.container}
+      style={styles.kidContainer}
       data={dictations}
       renderItem={renderDictation}
       keyExtractor={item => item.id}
       ListHeaderComponent={ListHeader}
-      contentContainerStyle={styles.listContent}
+      contentContainerStyle={styles.kidContent}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#f59e0b" />
       }
@@ -193,109 +257,249 @@ export default function HomeScreen({ navigation, user, onLogout }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: {
+  // === Main Screen ===
+  mainContainer: {
     flex: 1,
     backgroundColor: '#fffbeb',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
   },
+  mainContent: {
+    alignItems: 'center',
+    maxWidth: 360,
+    alignSelf: 'center',
+    width: '100%',
+  },
+  avatarWrap: {
+    width: 96,
+    height: 96,
+    borderRadius: 24,
+    backgroundColor: '#fef3c7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  avatarText: {
+    fontSize: 48,
+  },
+  mainGreeting: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#374151',
+    marginBottom: 4,
+  },
+  mainSub: {
+    fontSize: 18,
+    color: '#9ca3af',
+    marginBottom: 32,
+  },
+  bigButton: {
+    width: '100%',
+    paddingVertical: 28,
+    borderRadius: 24,
+    backgroundColor: '#f59e0b',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    shadowColor: '#f59e0b',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
+    marginBottom: 16,
+  },
+  bigButtonEmoji: {
+    fontSize: 36,
+  },
+  bigButtonText: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#fff',
+  },
+  parentButton: {
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#f3f4f6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+    marginBottom: 12,
+  },
+  parentButtonEmoji: {
+    fontSize: 20,
+  },
+  parentButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#6b7280',
+  },
+  logoutLink: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    marginTop: 8,
+  },
+  logoutText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#9ca3af',
+  },
+
+  // === Kid Mode ===
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#fffbeb',
   },
-  listContent: {
+  kidContainer: {
+    flex: 1,
+    backgroundColor: '#fffbeb',
+  },
+  kidContent: {
     padding: 16,
     paddingBottom: 32,
   },
-  header: {
+  topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 24,
-    marginTop: 8,
+    alignItems: 'center',
+    marginBottom: 20,
   },
-  greeting: {
-    fontSize: 16,
-    color: '#92400e',
-  },
-  userName: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#78350f',
-  },
-  headerButtons: {
+  topBarRight: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
   },
-  parentButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    backgroundColor: '#dbeafe',
-  },
-  parentButtonText: {
-    color: '#1d4ed8',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  logoutButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    backgroundColor: '#fef3c7',
-  },
-  logoutText: {
-    color: '#92400e',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 24,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
   },
-  statEmoji: {
+  backButtonText: {
     fontSize: 24,
-    marginBottom: 4,
+    color: '#9ca3af',
+    fontWeight: '600',
+    marginTop: -2,
   },
-  statValue: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#1f2937',
+  logoutIcon: {
+    fontSize: 18,
+    color: '#9ca3af',
   },
-  statLabel: {
+  percentBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  percentDiktat: {
     fontSize: 12,
+    fontWeight: '700',
+    color: '#d97706',
+  },
+  percentDivider: {
+    fontSize: 12,
+    color: '#d1d5db',
+  },
+  percentMathe: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#2563eb',
+  },
+  greetingSection: {
+    marginBottom: 20,
+  },
+  greetingTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#374151',
+  },
+  greetingSub: {
+    fontSize: 16,
     color: '#9ca3af',
     marginTop: 2,
   },
-  sectionTitle: {
-    fontSize: 20,
+  streakText: {
+    fontSize: 14,
     fontWeight: '700',
-    color: '#78350f',
-    marginBottom: 12,
+    color: '#ea580c',
+    textAlign: 'center',
+    marginBottom: 16,
   },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#9ca3af',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 12,
+    marginTop: 8,
+  },
+  emptyState: {
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#f3f4f6',
+    paddingVertical: 48,
+    alignItems: 'center',
+  },
+  emptyEmoji: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    color: '#6b7280',
+    fontWeight: '600',
+  },
+  emptySub: {
+    fontSize: 16,
+    color: '#9ca3af',
+    marginTop: 4,
+  },
+
+  // === Dictation cards ===
   card: {
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 16,
+    padding: 20,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#f3f4f6',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
   },
   cardRow: {
     flexDirection: 'row',
@@ -304,10 +508,10 @@ const styles = StyleSheet.create({
   cardIcon: {
     width: 48,
     height: 48,
-    borderRadius: 14,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 16,
   },
   cardIconDiktat: {
     backgroundColor: '#fef3c7',
@@ -322,17 +526,25 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   cardTitle: {
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '700',
     color: '#374151',
   },
   cardSub: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#9ca3af',
     marginTop: 2,
   },
-  chevron: {
-    fontSize: 24,
+  cardChevronWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#fffbeb',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cardChevron: {
+    fontSize: 22,
     color: '#f59e0b',
     fontWeight: '600',
   },

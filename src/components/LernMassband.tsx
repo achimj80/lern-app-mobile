@@ -1,54 +1,79 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import Svg, { Rect, Circle as SvgCircle } from 'react-native-svg';
 import { ScoreRank } from '../types';
 
 interface Props {
-  ranks: ScoreRank[];
-  currentPercent: number;
+  percent: number;
+  allRanks: ScoreRank[];
+  currentRank: ScoreRank;
   label?: string;
 }
 
-export default function LernMassband({ ranks, currentPercent, label }: Props) {
+export default function LernMassband({ percent, allRanks, currentRank, label }: Props) {
   return (
     <View style={styles.container}>
-      {label && <Text style={styles.label}>{label}</Text>}
-      <View style={styles.track}>
-        {ranks.map((rank, i) => {
-          const width = ((rank.maxPercent - rank.minPercent) / 100) * 100;
-          const isEarned = rank.earned;
-          const isCurrent = rank.current;
+      <Text style={styles.title}>{label ? `${label}-Maßband` : 'Dein Lern-Maßband'}</Text>
 
+      {/* Current rank highlight */}
+      <View style={styles.currentRow}>
+        <View style={styles.currentIconWrap}>
+          <Text style={styles.currentIcon}>{currentRank.icon}</Text>
+        </View>
+        <View style={styles.currentInfo}>
+          <Text style={styles.currentName}>{currentRank.name}</Text>
+          <Text style={styles.currentDesc}>{currentRank.description}</Text>
+        </View>
+        <Text style={styles.currentPercent}>{percent}%</Text>
+      </View>
+
+      {/* Progress bar */}
+      <View style={styles.trackOuter}>
+        <View style={[styles.trackFill, { width: `${Math.min(percent, 100)}%` }]} />
+        {/* Tick marks */}
+        {allRanks.slice(1).map(rank => (
+          <View
+            key={rank.id}
+            style={[styles.tick, { left: `${rank.minPercent}%` }]}
+          />
+        ))}
+        {/* Position marker */}
+        <View style={[styles.marker, { left: `${Math.min(percent, 100)}%` }]}>
+          <View style={styles.markerOuter}>
+            <View style={styles.markerInner} />
+          </View>
+        </View>
+      </View>
+
+      {/* Rank labels */}
+      <View style={styles.ranksRow}>
+        {allRanks.map(rank => {
+          const width = rank.maxPercent > 100 ? 100 - rank.minPercent : rank.maxPercent - rank.minPercent;
+          const isCurrent = rank.current;
           return (
             <View
               key={rank.id}
-              style={[
-                styles.segment,
-                { width: `${Math.min(width, 100)}%` as unknown as number },
-                isEarned && styles.segmentEarned,
-                isCurrent && styles.segmentCurrent,
-                i === 0 && styles.segmentFirst,
-                i === ranks.length - 1 && styles.segmentLast,
-              ]}
+              style={[styles.rankItem, { width: `${width}%`, left: `${rank.minPercent}%` }]}
             >
-              <Text style={styles.segmentIcon}>{rank.icon}</Text>
+              <Text style={[
+                styles.rankIcon,
+                !isCurrent && !rank.earned && { opacity: 0.3 },
+                !isCurrent && rank.earned && { opacity: 0.7 },
+              ]}>
+                {rank.icon}
+              </Text>
+              <Text style={[
+                styles.rankName,
+                isCurrent && { color: '#d97706' },
+                !isCurrent && rank.earned && { color: '#6b7280' },
+                !isCurrent && !rank.earned && { color: '#d1d5db' },
+              ]} numberOfLines={1}>
+                {rank.name}
+              </Text>
             </View>
           );
         })}
       </View>
-
-      {/* Current rank info */}
-      {ranks.map(rank =>
-        rank.current ? (
-          <View key={rank.id} style={styles.currentInfo}>
-            <Text style={styles.currentIcon}>{rank.icon}</Text>
-            <View>
-              <Text style={styles.currentName}>{rank.name}</Text>
-              <Text style={styles.currentDesc}>{rank.description}</Text>
-            </View>
-            <Text style={styles.currentPercent}>{currentPercent}%</Text>
-          </View>
-        ) : null
-      )}
     </View>
   );
 }
@@ -58,61 +83,44 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 16,
+    borderWidth: 1,
+    borderColor: '#f3f4f6',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
   },
-  label: {
-    fontSize: 16,
+  title: {
+    fontSize: 12,
     fontWeight: '700',
-    color: '#78350f',
+    color: '#9ca3af',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
     marginBottom: 12,
   },
-  track: {
+  currentRow: {
     flexDirection: 'row',
-    height: 40,
-    borderRadius: 20,
-    overflow: 'hidden',
-    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
   },
-  segment: {
+  currentIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#fef3c7',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#e5e7eb',
-    borderRightWidth: 1,
-    borderRightColor: '#d1d5db',
-  },
-  segmentFirst: {
-    borderTopLeftRadius: 20,
-    borderBottomLeftRadius: 20,
-  },
-  segmentLast: {
-    borderTopRightRadius: 20,
-    borderBottomRightRadius: 20,
-    borderRightWidth: 0,
-  },
-  segmentEarned: {
-    backgroundColor: '#fde68a',
-  },
-  segmentCurrent: {
-    backgroundColor: '#f59e0b',
-  },
-  segmentIcon: {
-    fontSize: 18,
-  },
-  currentInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    gap: 12,
   },
   currentIcon: {
-    fontSize: 32,
+    fontSize: 24,
+  },
+  currentInfo: {
+    flex: 1,
   },
   currentName: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
     color: '#374151',
   },
@@ -121,9 +129,71 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
   },
   currentPercent: {
-    marginLeft: 'auto',
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: '800',
     color: '#f59e0b',
+  },
+  trackOuter: {
+    height: 12,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 6,
+    overflow: 'visible',
+    position: 'relative',
+  },
+  trackFill: {
+    height: '100%',
+    borderRadius: 6,
+    backgroundColor: '#f59e0b',
+  },
+  tick: {
+    position: 'absolute',
+    top: 0,
+    width: 2,
+    height: 12,
+    backgroundColor: '#d1d5db',
+  },
+  marker: {
+    position: 'absolute',
+    top: -4,
+    marginLeft: -10,
+  },
+  markerOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#f59e0b',
+    borderWidth: 3,
+    borderColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  markerInner: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#fff',
+  },
+  ranksRow: {
+    position: 'relative',
+    height: 48,
+    marginTop: 12,
+  },
+  rankItem: {
+    position: 'absolute',
+    alignItems: 'center',
+  },
+  rankIcon: {
+    fontSize: 16,
+  },
+  rankName: {
+    fontSize: 9,
+    fontWeight: '700',
+    marginTop: 2,
+    textAlign: 'center',
   },
 });

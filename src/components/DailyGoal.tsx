@@ -2,52 +2,55 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
+const DAILY_GOAL = 1;
+const RADIUS = 28;
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+
 interface GoalRingProps {
   count: number;
-  goal: number;
-  emoji: string;
   label: string;
+  icon: string;
   color: string;
+  bgColor: string;
 }
 
-function GoalRing({ count, goal, emoji, label, color }: GoalRingProps) {
-  const done = count >= goal;
-  const progress = Math.min(count / goal, 1);
-  const size = 64;
-  const strokeWidth = 5;
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference * (1 - progress);
+function GoalRing({ count, label, icon, color, bgColor }: GoalRingProps) {
+  const progress = Math.min(count / DAILY_GOAL, 1);
+  const offset = CIRCUMFERENCE * (1 - progress);
+  const isComplete = count >= DAILY_GOAL;
 
   return (
     <View style={styles.ringContainer}>
       <View style={styles.ringWrapper}>
-        <Svg width={size} height={size}>
+        <Svg width={64} height={64} style={{ transform: [{ rotate: '-90deg' }] }}>
           <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            stroke="#e5e7eb"
-            strokeWidth={strokeWidth}
+            cx={32} cy={32} r={RADIUS}
             fill="none"
+            stroke={isComplete ? bgColor : '#f3f4f6'}
+            strokeWidth={5}
           />
           <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            stroke={done ? '#22c55e' : color}
-            strokeWidth={strokeWidth}
+            cx={32} cy={32} r={RADIUS}
             fill="none"
-            strokeDasharray={`${circumference}`}
-            strokeDashoffset={offset}
+            stroke={color}
+            strokeWidth={5}
             strokeLinecap="round"
-            rotation="-90"
-            origin={`${size / 2}, ${size / 2}`}
+            strokeDasharray={`${CIRCUMFERENCE}`}
+            strokeDashoffset={offset}
           />
         </Svg>
-        <Text style={styles.ringEmoji}>{done ? '✅' : emoji}</Text>
+        <View style={styles.ringCenter}>
+          <Text style={styles.ringCenterText}>
+            {isComplete ? '✅' : `${count}/${DAILY_GOAL}`}
+          </Text>
+        </View>
       </View>
-      <Text style={styles.ringLabel}>{label}</Text>
+      <View style={styles.ringInfo}>
+        <Text style={styles.ringLabel}>{icon} {label}</Text>
+        <Text style={styles.ringStatus}>
+          {isComplete ? 'Geschafft!' : count === 0 ? 'Noch offen' : 'Fast da!'}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -58,18 +61,19 @@ interface Props {
 }
 
 export default function DailyGoal({ diktatCount, matheCount }: Props) {
-  const bothDone = diktatCount >= 1 && matheCount >= 1;
+  const allComplete = diktatCount >= DAILY_GOAL && matheCount >= DAILY_GOAL;
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Tagesziel</Text>
-      <View style={styles.ringsRow}>
-        <GoalRing count={diktatCount} goal={1} emoji="📖" label="Diktat" color="#f59e0b" />
-        <GoalRing count={matheCount} goal={1} emoji="🔢" label="Mathe" color="#3b82f6" />
-      </View>
-      {bothDone && (
-        <View style={styles.successBanner}>
-          <Text style={styles.successText}>🎉 Tagesziel geschafft!</Text>
+    <View style={[styles.container, allComplete && styles.containerComplete]}>
+      {allComplete ? (
+        <View style={styles.completeContent}>
+          <Text style={styles.completeTitle}>✅ Tagesziel erreicht!</Text>
+          <Text style={styles.completeSub}>Super, du hast heute genug geübt!</Text>
+        </View>
+      ) : (
+        <View style={styles.ringsRow}>
+          <GoalRing count={diktatCount} label="Diktat" icon="📖" color="#f59e0b" bgColor="#d1fae5" />
+          <GoalRing count={matheCount} label="Mathe" icon="🔢" color="#3b82f6" bgColor="#dbeafe" />
         </View>
       )}
     </View>
@@ -81,50 +85,72 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 16,
+    borderWidth: 1,
+    borderColor: '#f3f4f6',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
   },
-  title: {
-    fontSize: 16,
+  containerComplete: {
+    backgroundColor: '#f0fdf4',
+    borderColor: '#bbf7d0',
+  },
+  completeContent: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  completeTitle: {
+    fontSize: 18,
     fontWeight: '700',
-    color: '#78350f',
-    marginBottom: 12,
+    color: '#15803d',
+  },
+  completeSub: {
+    fontSize: 14,
+    color: '#16a34a',
+    marginTop: 4,
   },
   ringsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    gap: 8,
   },
   ringContainer: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 12,
   },
   ringWrapper: {
+    width: 64,
+    height: 64,
     position: 'relative',
+  },
+  ringCenter: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  ringEmoji: {
-    position: 'absolute',
-    fontSize: 22,
+  ringCenterText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#374151',
+  },
+  ringInfo: {
+    flex: 1,
   },
   ringLabel: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#6b7280',
-  },
-  successBanner: {
-    backgroundColor: '#dcfce7',
-    borderRadius: 12,
-    padding: 10,
-    marginTop: 12,
-    alignItems: 'center',
-  },
-  successText: {
-    color: '#16a34a',
     fontWeight: '700',
-    fontSize: 14,
+    color: '#374151',
+  },
+  ringStatus: {
+    fontSize: 12,
+    color: '#9ca3af',
+    marginTop: 2,
   },
 });
