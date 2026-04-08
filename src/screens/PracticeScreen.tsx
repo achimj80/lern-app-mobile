@@ -8,6 +8,7 @@ import {
   Alert,
   Image,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
@@ -45,6 +46,10 @@ export default function PracticeScreen({ navigation, route }: Props) {
     loadDictation();
     return () => {
       soundRef.current?.unloadAsync();
+      if (htmlAudioRef.current) {
+        htmlAudioRef.current.pause();
+        htmlAudioRef.current = null;
+      }
     };
   }, []);
 
@@ -58,37 +63,64 @@ export default function PracticeScreen({ navigation, route }: Props) {
     setDictation(d);
   };
 
+  const htmlAudioRef = useRef<HTMLAudioElement | null>(null);
+
   // Play a sentence via TTS API
   const playAudio = useCallback(async (text: string, rate: number = 0.85) => {
     if (isSpeaking) return;
     setIsSpeaking(true);
     try {
-      if (soundRef.current) {
-        await soundRef.current.unloadAsync();
-        soundRef.current = null;
-      }
       const res = await fetch(`${API_BASE}/api/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, rate }),
       });
       if (!res.ok) throw new Error('TTS failed');
-      const { audio } = await res.json();
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: `data:audio/mp3;base64,${audio}` },
-        { shouldPlay: true }
-      );
-      soundRef.current = sound;
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if ('didJustFinish' in status && status.didJustFinish) {
+      const data = await res.json();
+      const audioContent = data.audioContent || data.audio;
+      if (!audioContent) throw new Error('No audio content');
+
+      if (Platform.OS === 'web') {
+        // Web: use HTML5 Audio (expo-av doesn't handle data URIs well on web)
+        if (htmlAudioRef.current) {
+          htmlAudioRef.current.pause();
+          htmlAudioRef.current = null;
+        }
+        const audio = new window.Audio(`data:audio/mp3;base64,${audioContent}`);
+        htmlAudioRef.current = audio;
+        audio.onended = () => {
           setIsSpeaking(false);
           setHasPlayedOnce(true);
+          htmlAudioRef.current = null;
+        };
+        audio.onerror = () => {
+          setIsSpeaking(false);
+          setHasPlayedOnce(true);
+          htmlAudioRef.current = null;
+        };
+        await audio.play();
+      } else {
+        // Native: use expo-av
+        if (soundRef.current) {
+          await soundRef.current.unloadAsync();
+          soundRef.current = null;
         }
-      });
+        const { sound } = await Audio.Sound.createAsync(
+          { uri: `data:audio/mp3;base64,${audioContent}` },
+          { shouldPlay: true }
+        );
+        soundRef.current = sound;
+        sound.setOnPlaybackStatusUpdate((status) => {
+          if ('didJustFinish' in status && status.didJustFinish) {
+            setIsSpeaking(false);
+            setHasPlayedOnce(true);
+          }
+        });
+      }
     } catch (e) {
       console.error('TTS error:', e);
       setIsSpeaking(false);
-      setHasPlayedOnce(true); // Allow proceeding even if TTS fails
+      setHasPlayedOnce(true);
     }
   }, [isSpeaking]);
 
@@ -109,11 +141,22 @@ export default function PracticeScreen({ navigation, route }: Props) {
     setPhase('dictating');
   };
 
+  const stopCurrentAudio = () => {
+    if (Platform.OS === 'web') {
+      if (htmlAudioRef.current) {
+        htmlAudioRef.current.pause();
+        htmlAudioRef.current = null;
+      }
+    } else {
+      if (soundRef.current) {
+        soundRef.current.stopAsync().catch(() => {});
+      }
+    }
+  };
+
   const handleRepeat = () => {
     if (!dictation || currentSentence >= sentences.length) return;
-    if (soundRef.current) {
-      soundRef.current.stopAsync().catch(() => {});
-    }
+    stopCurrentAudio();
     setIsSpeaking(false);
     setTimeout(() => {
       playAudio(sentences[currentSentence], isMath ? 1.0 : 0.85);
@@ -122,9 +165,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
 
   const handlePrevSentence = () => {
     if (currentSentence > 0) {
-      if (soundRef.current) {
-        soundRef.current.stopAsync().catch(() => {});
-      }
+      stopCurrentAudio();
       setIsSpeaking(false);
       setHasPlayedOnce(false);
       setCurrentSentence(prev => prev - 1);
@@ -133,9 +174,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
 
   const handleNextSentence = () => {
     if (!dictation) return;
-    if (soundRef.current) {
-      soundRef.current.stopAsync().catch(() => {});
-    }
+    stopCurrentAudio();
     setIsSpeaking(false);
 
     if (currentSentence < sentences.length - 1) {
