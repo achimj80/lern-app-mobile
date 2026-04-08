@@ -118,7 +118,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
         });
       }
     } catch (e) {
-      console.error('TTS error:', e);
+      if (__DEV__) console.warn('TTS error:', e);
       setIsSpeaking(false);
       setHasPlayedOnce(true);
     }
@@ -283,7 +283,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
         date: new Date().toISOString(),
         errorCount: errors.length,
         totalWords,
-        errorTypes: [...new Set(errors.map(e => e.type))] as any,
+        errorTypes: [...new Set(errors.map(e => e.type))] as SpellingError['type'][],
       });
 
       navigation.replace('Result', { sessionId });

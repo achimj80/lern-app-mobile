@@ -10,8 +10,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { DictationSession, Dictation } from '../types';
-import { getSession, getDictation, getProgress } from '../services/storage';
-import { calculateOverallStats } from '../services/gamification';
+import { getSession, getDictation } from '../services/storage';
 import { RootStackParamList } from '../navigation';
 
 interface Props {

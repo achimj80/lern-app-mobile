@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import Svg, { Rect, Circle as SvgCircle } from 'react-native-svg';
+
 import { ScoreRank } from '../types';
 
 interface Props {
