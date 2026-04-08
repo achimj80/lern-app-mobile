@@ -11,6 +11,7 @@ import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import PracticeScreen from './src/screens/PracticeScreen';
 import ResultScreen from './src/screens/ResultScreen';
+import ParentScreen from './src/screens/ParentScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -63,6 +64,9 @@ export default function App() {
                 onLogout={() => setUser(null)}
               />
             )}
+          </Stack.Screen>
+          <Stack.Screen name="Parent" options={{ title: 'Elternbereich', headerBackTitle: 'Zurück' }}>
+            {(props) => <ParentScreen {...props} user={user} />}
           </Stack.Screen>
           <Stack.Screen
             name="Practice"

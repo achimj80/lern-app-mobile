@@ -12,6 +12,8 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Dictation, DictationSession, ProgressEntry } from '../types';
 import { getAllDictations, getAllSessions, getProgress, UserProfile, logout } from '../services/storage';
 import { calculateStreak, getTodayPracticeCount, calculateOverallStats } from '../services/gamification';
+import DailyGoal from '../components/DailyGoal';
+import LernMassband from '../components/LernMassband';
 import { RootStackParamList } from '../navigation';
 
 interface Props {
@@ -111,9 +113,14 @@ export default function HomeScreen({ navigation, user, onLogout }: Props) {
           <Text style={styles.greeting}>{getGreeting()},</Text>
           <Text style={styles.userName}>{user.name} {user.icon}</Text>
         </View>
-        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-          <Text style={styles.logoutText}>Abmelden</Text>
-        </TouchableOpacity>
+        <View style={styles.headerButtons}>
+          <TouchableOpacity onPress={() => navigation.navigate('Parent')} style={styles.parentButton}>
+            <Text style={styles.parentButtonText}>Eltern</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+            <Text style={styles.logoutText}>Abmelden</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Stats Row */}
@@ -136,19 +143,29 @@ export default function HomeScreen({ navigation, user, onLogout }: Props) {
       </View>
 
       {/* Daily Goal */}
-      <View style={styles.dailyGoal}>
-        <Text style={styles.sectionTitle}>Tagesziel</Text>
-        <View style={styles.goalRow}>
-          <View style={styles.goalItem}>
-            <Text style={styles.goalEmoji}>{diktatCount >= 1 ? '✅' : '⭕'}</Text>
-            <Text style={styles.goalText}>Diktat</Text>
-          </View>
-          <View style={styles.goalItem}>
-            <Text style={styles.goalEmoji}>{matheCount >= 1 ? '✅' : '⭕'}</Text>
-            <Text style={styles.goalText}>Mathe</Text>
-          </View>
-        </View>
+      <View style={{ marginBottom: 24 }}>
+        <DailyGoal diktatCount={diktatCount} matheCount={matheCount} />
       </View>
+
+      {/* Maßbänder */}
+      {diktatStats.totalWords > 0 && (
+        <View style={{ marginBottom: 16 }}>
+          <LernMassband
+            ranks={diktatStats.allRanks}
+            currentPercent={diktatStats.overallPercent}
+            label="Diktat-Maßband"
+          />
+        </View>
+      )}
+      {matheStats.totalWords > 0 && (
+        <View style={{ marginBottom: 24 }}>
+          <LernMassband
+            ranks={matheStats.allRanks}
+            currentPercent={matheStats.overallPercent}
+            label="Mathe-Maßband"
+          />
+        </View>
+      )}
 
       {/* Diktat Section */}
       {diktatList.length > 0 && (
@@ -206,6 +223,21 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#78350f',
   },
+  headerButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  parentButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: '#dbeafe',
+  },
+  parentButtonText: {
+    color: '#1d4ed8',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   logoutButton: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -247,34 +279,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9ca3af',
     marginTop: 2,
-  },
-  dailyGoal: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  goalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: 12,
-  },
-  goalItem: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  goalEmoji: {
-    fontSize: 32,
-  },
-  goalText: {
-    fontSize: 14,
-    color: '#6b7280',
-    fontWeight: '600',
   },
   sectionTitle: {
     fontSize: 20,

@@ -12,6 +12,8 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Audio } from 'expo-av';
+import * as ImagePicker from 'expo-image-picker';
+import { Image } from 'react-native';
 import { Dictation, DictationSession } from '../types';
 import { getDictation, createSession, updateSession, addProgressEntry } from '../services/storage';
 import { API_BASE } from '../config';
@@ -31,6 +33,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
   const [answers, setAnswers] = useState<string[]>([]);
   const [phase, setPhase] = useState<'loading' | 'ready' | 'practice' | 'submitting'>('loading');
   const [isPlaying, setIsPlaying] = useState(false);
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
 
   const isMath = dictation?.type === 'mathe';
@@ -105,6 +108,82 @@ export default function PracticeScreen({ navigation, route }: Props) {
     }
   };
 
+  const handlePhoto = async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Berechtigung', 'Kamera-Zugriff wird benötigt');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+      base64: true,
+    });
+    if (result.canceled || !result.assets[0].base64) return;
+
+    setPhotoUri(result.assets[0].uri);
+    submitPhoto(result.assets[0].base64);
+  };
+
+  const handlePickPhoto = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+      base64: true,
+    });
+    if (result.canceled || !result.assets[0].base64) return;
+
+    setPhotoUri(result.assets[0].uri);
+    submitPhoto(result.assets[0].base64);
+  };
+
+  const submitPhoto = async (base64: string) => {
+    if (!session || !dictation) return;
+    setPhase('submitting');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/analyze-photo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: base64,
+          expectedText: dictation.text,
+          type: dictation.type || 'diktat',
+        }),
+      });
+      const analysis = await res.json();
+      if (!res.ok) throw new Error(analysis.error);
+
+      const score = analysis.score ?? 0;
+      const errors = analysis.errors ?? [];
+
+      await updateSession(session.id, {
+        completedAt: new Date().toISOString(),
+        recognizedText: analysis.recognizedText,
+        correctedText: analysis.correctedText,
+        errors,
+        score,
+      });
+
+      await addProgressEntry({
+        sessionId: session.id,
+        dictationId: dictation.id,
+        dictationTitle: dictation.title,
+        type: dictation.type || 'diktat',
+        date: new Date().toISOString(),
+        errorCount: errors.length,
+        totalWords: dictation.text.split(/\s+/).length,
+        errorTypes: errors.map((e: { type: string }) => e.type),
+      });
+
+      navigation.replace('Result', { sessionId: session.id });
+    } catch {
+      Alert.alert('Fehler', 'Foto-Analyse fehlgeschlagen');
+      setPhase('ready');
+      setPhotoUri(null);
+    }
+  };
+
   const submitSession = async (finalAnswers: string[]) => {
     if (!session || !dictation) return;
     setPhase('submitting');
@@ -175,6 +254,21 @@ export default function PracticeScreen({ navigation, route }: Props) {
         <TouchableOpacity style={styles.startButton} onPress={handleStart}>
           <Text style={styles.startButtonText}>Los geht's!</Text>
         </TouchableOpacity>
+        {!isMath && (
+          <View style={styles.photoOptions}>
+            <Text style={styles.photoHint}>Oder auf Papier schreiben:</Text>
+            <View style={styles.photoButtons}>
+              <TouchableOpacity style={styles.photoButton} onPress={handlePhoto}>
+                <Text style={styles.photoButtonEmoji}>📸</Text>
+                <Text style={styles.photoButtonText}>Foto</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.photoButton} onPress={handlePickPhoto}>
+                <Text style={styles.photoButtonEmoji}>🖼️</Text>
+                <Text style={styles.photoButtonText}>Galerie</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Text style={styles.backButtonText}>Zurück</Text>
         </TouchableOpacity>
@@ -380,5 +474,36 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '700',
+  },
+  photoOptions: {
+    marginTop: 24,
+    alignItems: 'center',
+  },
+  photoHint: {
+    fontSize: 14,
+    color: '#9ca3af',
+    marginBottom: 12,
+  },
+  photoButtons: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  photoButton: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fde68a',
+    gap: 4,
+  },
+  photoButtonEmoji: {
+    fontSize: 24,
+  },
+  photoButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#92400e',
   },
 });
