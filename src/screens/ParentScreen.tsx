@@ -200,16 +200,22 @@ export default function ParentScreen({ navigation, user }: Props) {
       </View>
 
       {/* Maßbänder */}
-      {diktatStats.totalWords > 0 && (
-        <View style={{ marginBottom: 12 }}>
-          <LernMassband ranks={diktatStats.allRanks} currentPercent={diktatStats.overallPercent} label="Diktat-Maßband" />
-        </View>
-      )}
-      {matheStats.totalWords > 0 && (
-        <View style={{ marginBottom: 24 }}>
-          <LernMassband ranks={matheStats.allRanks} currentPercent={matheStats.overallPercent} label="Mathe-Maßband" />
-        </View>
-      )}
+      <View style={{ marginBottom: 12 }}>
+        <LernMassband
+          percent={diktatStats.overallPercent}
+          allRanks={diktatStats.allRanks}
+          currentRank={diktatStats.currentRank}
+          label="Diktat"
+        />
+      </View>
+      <View style={{ marginBottom: 24 }}>
+        <LernMassband
+          percent={matheStats.overallPercent}
+          allRanks={matheStats.allRanks}
+          currentRank={matheStats.currentRank}
+          label="Mathe"
+        />
+      </View>
 
       {/* Create Buttons */}
       <TouchableOpacity

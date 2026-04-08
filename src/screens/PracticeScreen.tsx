@@ -1,23 +1,25 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  ScrollView,
   Alert,
+  Image,
+  ScrollView,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
-import { Image } from 'react-native';
-import { Dictation, DictationSession } from '../types';
+import { Dictation, DictationSession, SpellingError } from '../types';
 import { getDictation, createSession, updateSession, addProgressEntry } from '../services/storage';
 import { API_BASE } from '../config';
 import { RootStackParamList } from '../navigation';
+import StepIndicator from '../components/StepIndicator';
+
+type Phase = 'ready' | 'dictating' | 'photo' | 'analyzing' | 'review';
 
 interface Props {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Practice'>;
@@ -27,18 +29,17 @@ interface Props {
 export default function PracticeScreen({ navigation, route }: Props) {
   const { id } = route.params;
   const [dictation, setDictation] = useState<Dictation | null>(null);
-  const [session, setSession] = useState<DictationSession | null>(null);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [input, setInput] = useState('');
-  const [answers, setAnswers] = useState<string[]>([]);
-  const [phase, setPhase] = useState<'loading' | 'ready' | 'practice' | 'submitting'>('loading');
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [phase, setPhase] = useState<Phase>('ready');
+  const [currentSentence, setCurrentSentence] = useState(0);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [hasPlayedOnce, setHasPlayedOnce] = useState(false);
+  const [sessionId, setSessionId] = useState('');
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imageUri, setImageUri] = useState<string | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
 
   const isMath = dictation?.type === 'mathe';
   const sentences = dictation?.sentences || [];
-  const currentSentence = sentences[currentIndex] || '';
 
   useEffect(() => {
     loadDictation();
@@ -55,17 +56,16 @@ export default function PracticeScreen({ navigation, route }: Props) {
       return;
     }
     setDictation(d);
-    const s = await createSession(d.id);
-    setSession(s);
-    setPhase('ready');
   };
 
-  const playAudio = async (text: string, rate: number = 0.85) => {
-    if (isPlaying) return;
-    setIsPlaying(true);
+  // Play a sentence via TTS API
+  const playAudio = useCallback(async (text: string, rate: number = 0.85) => {
+    if (isSpeaking) return;
+    setIsSpeaking(true);
     try {
       if (soundRef.current) {
         await soundRef.current.unloadAsync();
+        soundRef.current = null;
       }
       const res = await fetch(`${API_BASE}/api/tts`, {
         method: 'POST',
@@ -81,34 +81,73 @@ export default function PracticeScreen({ navigation, route }: Props) {
       soundRef.current = sound;
       sound.setOnPlaybackStatusUpdate((status) => {
         if ('didJustFinish' in status && status.didJustFinish) {
-          setIsPlaying(false);
+          setIsSpeaking(false);
+          setHasPlayedOnce(true);
         }
       });
-    } catch {
-      setIsPlaying(false);
+    } catch (e) {
+      console.error('TTS error:', e);
+      setIsSpeaking(false);
+      setHasPlayedOnce(true); // Allow proceeding even if TTS fails
+    }
+  }, [isSpeaking]);
+
+  // Auto-play when entering dictating phase or moving to next sentence
+  useEffect(() => {
+    if (phase === 'dictating' && dictation && sentences.length > 0) {
+      const timer = setTimeout(() => {
+        playAudio(sentences[currentSentence], isMath ? 1.0 : 0.85);
+      }, 600);
+      return () => clearTimeout(timer);
+    }
+  }, [phase, currentSentence]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleStart = async () => {
+    if (!dictation) return;
+    const session = await createSession(dictation.id);
+    setSessionId(session.id);
+    setPhase('dictating');
+  };
+
+  const handleRepeat = () => {
+    if (!dictation || currentSentence >= sentences.length) return;
+    if (soundRef.current) {
+      soundRef.current.stopAsync().catch(() => {});
+    }
+    setIsSpeaking(false);
+    setTimeout(() => {
+      playAudio(sentences[currentSentence], isMath ? 1.0 : 0.85);
+    }, 100);
+  };
+
+  const handlePrevSentence = () => {
+    if (currentSentence > 0) {
+      if (soundRef.current) {
+        soundRef.current.stopAsync().catch(() => {});
+      }
+      setIsSpeaking(false);
+      setHasPlayedOnce(false);
+      setCurrentSentence(prev => prev - 1);
     }
   };
 
-  const handleStart = () => {
-    setPhase('practice');
-    playAudio(currentSentence, isMath ? 1.0 : 0.85);
-  };
+  const handleNextSentence = () => {
+    if (!dictation) return;
+    if (soundRef.current) {
+      soundRef.current.stopAsync().catch(() => {});
+    }
+    setIsSpeaking(false);
 
-  const handleNext = () => {
-    const newAnswers = [...answers, input.trim()];
-    setAnswers(newAnswers);
-    setInput('');
-
-    if (currentIndex < sentences.length - 1) {
-      const nextIdx = currentIndex + 1;
-      setCurrentIndex(nextIdx);
-      playAudio(sentences[nextIdx], isMath ? 1.0 : 0.85);
+    if (currentSentence < sentences.length - 1) {
+      setHasPlayedOnce(false);
+      setCurrentSentence(prev => prev + 1);
     } else {
-      submitSession(newAnswers);
+      // Last sentence done -> photo phase
+      setPhase('photo');
     }
   };
 
-  const handlePhoto = async () => {
+  const handleTakePhoto = async () => {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
       Alert.alert('Berechtigung', 'Kamera-Zugriff wird benötigt');
@@ -120,9 +159,8 @@ export default function PracticeScreen({ navigation, route }: Props) {
       base64: true,
     });
     if (result.canceled || !result.assets[0].base64) return;
-
-    setPhotoUri(result.assets[0].uri);
-    submitPhoto(result.assets[0].base64);
+    setImageUri(result.assets[0].uri);
+    setImageBase64(result.assets[0].base64);
   };
 
   const handlePickPhoto = async () => {
@@ -132,105 +170,87 @@ export default function PracticeScreen({ navigation, route }: Props) {
       base64: true,
     });
     if (result.canceled || !result.assets[0].base64) return;
-
-    setPhotoUri(result.assets[0].uri);
-    submitPhoto(result.assets[0].base64);
+    setImageUri(result.assets[0].uri);
+    setImageBase64(result.assets[0].base64);
   };
 
-  const submitPhoto = async (base64: string) => {
-    if (!session || !dictation) return;
-    setPhase('submitting');
+  const handleAnalyzePhoto = async () => {
+    if (!imageBase64 || !dictation) return;
+    setPhase('analyzing');
+
+    const totalWords = dictation.text.split(/\s+/).length;
+    const imageDataUri = `data:image/jpeg;base64,${imageBase64}`;
 
     try {
-      const res = await fetch(`${API_BASE}/api/analyze-photo`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image: base64,
-          expectedText: dictation.text,
-          type: dictation.type || 'diktat',
-        }),
-      });
-      const analysis = await res.json();
-      if (!res.ok) throw new Error(analysis.error);
-
-      const score = analysis.score ?? 0;
-      const errors = analysis.errors ?? [];
-
-      await updateSession(session.id, {
-        completedAt: new Date().toISOString(),
-        recognizedText: analysis.recognizedText,
-        correctedText: analysis.correctedText,
-        errors,
-        score,
-      });
-
-      await addProgressEntry({
-        sessionId: session.id,
-        dictationId: dictation.id,
-        dictationTitle: dictation.title,
-        type: dictation.type || 'diktat',
-        date: new Date().toISOString(),
-        errorCount: errors.length,
-        totalWords: dictation.text.split(/\s+/).length,
-        errorTypes: errors.map((e: { type: string }) => e.type),
-      });
-
-      navigation.replace('Result', { sessionId: session.id });
-    } catch {
-      Alert.alert('Fehler', 'Foto-Analyse fehlgeschlagen');
-      setPhase('ready');
-      setPhotoUri(null);
-    }
-  };
-
-  const submitSession = async (finalAnswers: string[]) => {
-    if (!session || !dictation) return;
-    setPhase('submitting');
-
-    try {
-      const recognizedText = finalAnswers.join('\n');
+      // Try combined AI analysis
       const res = await fetch(`${API_BASE}/api/analyze-dictation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          image: imageDataUri,
           expectedText: dictation.text,
-          recognizedText,
           type: dictation.type || 'diktat',
         }),
       });
-      const analysis = await res.json();
 
-      const score = analysis.score ?? 0;
-      const errors = analysis.errors ?? [];
+      let recognizedText = '';
+      let errors: SpellingError[] = [];
 
-      await updateSession(session.id, {
+      if (res.ok) {
+        const data = await res.json();
+        recognizedText = data.recognizedText || '';
+        if (Array.isArray(data.errors)) {
+          errors = data.errors;
+        }
+      }
+
+      // Fallback: try analyze-photo endpoint
+      if (errors.length === 0 && !recognizedText) {
+        const res2 = await fetch(`${API_BASE}/api/analyze-photo`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image: imageBase64,
+            expectedText: dictation.text,
+            type: dictation.type || 'diktat',
+          }),
+        });
+        if (res2.ok) {
+          const data2 = await res2.json();
+          recognizedText = data2.recognizedText || '';
+          errors = data2.errors || [];
+        }
+      }
+
+      const score = Math.max(0, Math.round(((totalWords - errors.length) / totalWords) * 100));
+
+      await updateSession(sessionId, {
         completedAt: new Date().toISOString(),
         recognizedText,
-        correctedText: analysis.correctedText,
         errors,
         score,
       });
 
       await addProgressEntry({
-        sessionId: session.id,
+        sessionId,
         dictationId: dictation.id,
         dictationTitle: dictation.title,
         type: dictation.type || 'diktat',
         date: new Date().toISOString(),
         errorCount: errors.length,
-        totalWords: dictation.text.split(/\s+/).length,
-        errorTypes: errors.map((e: { type: string }) => e.type),
+        totalWords,
+        errorTypes: [...new Set(errors.map(e => e.type))] as any,
       });
 
-      navigation.replace('Result', { sessionId: session.id });
+      navigation.replace('Result', { sessionId });
     } catch {
-      Alert.alert('Fehler', 'Auswertung fehlgeschlagen');
-      setPhase('practice');
+      Alert.alert('Fehler', 'Die Analyse hat leider nicht geklappt. Bitte versuche es nochmal.');
+      setPhase('photo');
     }
   };
 
-  if (phase === 'loading') {
+  // === LOADING ===
+  if (!dictation) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color="#f59e0b" />
@@ -238,113 +258,227 @@ export default function PracticeScreen({ navigation, route }: Props) {
     );
   }
 
+  // === PHASE: READY ===
   if (phase === 'ready') {
+    const steps = isMath
+      ? [
+          { icon: '🎧', text: 'Ich lese dir jede Aufgabe vor.' },
+          { icon: '✏️', text: 'Schreibe die ganze Rechnung mit Ergebnis auf.' },
+          { icon: '👆', text: 'Dann klickst du „Nächste Aufgabe".' },
+          { icon: '📸', text: 'Am Ende machst du ein Foto.' },
+        ]
+      : [
+          { icon: '🎧', text: 'Ich lese dir jeden Satz vor.' },
+          { icon: '✏️', text: 'Du schreibst ihn auf dein Blatt.' },
+          { icon: '👆', text: 'Dann klickst du „Nächster Satz".' },
+          { icon: '📸', text: 'Am Ende machst du ein Foto.' },
+        ];
+
     return (
       <View style={styles.center}>
-        <Text style={styles.readyEmoji}>{isMath ? '🔢' : '📖'}</Text>
-        <Text style={styles.readyTitle}>{dictation?.title}</Text>
+        <StepIndicator currentPhase="ready" />
+
+        <View style={[styles.readyIcon, isMath ? styles.readyIconMath : styles.readyIconDiktat]}>
+          <Text style={styles.readyEmoji}>{isMath ? '🔢' : '📝'}</Text>
+        </View>
+        <Text style={styles.readyTitle}>{dictation.title}</Text>
         <Text style={styles.readyInfo}>
           {sentences.length} {isMath ? 'Aufgaben' : 'Sätze'}
         </Text>
-        <Text style={styles.readyHint}>
-          {isMath
-            ? 'Du hörst die Aufgabe und tippst die Lösung ein.'
-            : 'Du hörst den Satz und schreibst ihn auf.'}
-        </Text>
+
+        <View style={styles.howItWorks}>
+          <Text style={styles.howTitle}>So geht's:</Text>
+          {steps.map((step, i) => (
+            <View key={i} style={styles.howStep}>
+              <View style={styles.howIconWrap}>
+                <Text style={styles.howIcon}>{step.icon}</Text>
+              </View>
+              <Text style={styles.howText}>{step.text}</Text>
+            </View>
+          ))}
+        </View>
+
         <TouchableOpacity style={styles.startButton} onPress={handleStart}>
           <Text style={styles.startButtonText}>Los geht's!</Text>
         </TouchableOpacity>
-        {!isMath && (
-          <View style={styles.photoOptions}>
-            <Text style={styles.photoHint}>Oder auf Papier schreiben:</Text>
-            <View style={styles.photoButtons}>
-              <TouchableOpacity style={styles.photoButton} onPress={handlePhoto}>
-                <Text style={styles.photoButtonEmoji}>📸</Text>
-                <Text style={styles.photoButtonText}>Foto</Text>
+
+        <TouchableOpacity style={styles.backLink} onPress={() => navigation.goBack()}>
+          <Text style={styles.backLinkText}>{'‹'}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // === PHASE: DICTATING ===
+  if (phase === 'dictating') {
+    const total = sentences.length;
+    const isLast = currentSentence === total - 1;
+    const progress = ((currentSentence + 1) / total) * 100;
+
+    return (
+      <View style={styles.dictatingContainer}>
+        {/* Top */}
+        <View style={styles.dictatingTop}>
+          <StepIndicator currentPhase="dictating" />
+
+          {/* Close button */}
+          <TouchableOpacity style={styles.closeButton} onPress={() => navigation.goBack()}>
+            <Text style={styles.closeButtonText}>✕</Text>
+          </TouchableOpacity>
+
+          <View style={styles.progressHeader}>
+            <Text style={styles.progressLabel}>
+              {isMath ? 'Aufgabe' : 'Satz'} {currentSentence + 1} von {total}
+            </Text>
+            <Text style={styles.progressPercent}>{Math.round(progress)}%</Text>
+          </View>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${progress}%` }]} />
+          </View>
+        </View>
+
+        {/* Center: Speaking animation */}
+        <View style={styles.dictatingCenter}>
+          {isSpeaking ? (
+            <>
+              <View style={styles.soundBars}>
+                {[1, 2, 3, 4, 5, 4, 3].map((h, i) => (
+                  <View
+                    key={i}
+                    style={[styles.soundBar, { height: h * 14 }]}
+                  />
+                ))}
+              </View>
+              <Text style={styles.listeningText}>Hör gut zu ...</Text>
+            </>
+          ) : hasPlayedOnce ? (
+            <>
+              <Text style={styles.writeEmoji}>✏️</Text>
+              <Text style={styles.writeText}>Jetzt schreiben!</Text>
+            </>
+          ) : (
+            <>
+              <ActivityIndicator size="large" color="#f59e0b" />
+              <Text style={styles.waitingText}>Gleich geht es los ...</Text>
+            </>
+          )}
+        </View>
+
+        {/* Bottom: Buttons */}
+        <View style={styles.dictatingBottom}>
+          <TouchableOpacity style={styles.repeatButton} onPress={handleRepeat}>
+            <Text style={styles.repeatButtonText}>🔊 Nochmal vorlesen</Text>
+          </TouchableOpacity>
+
+          <View style={styles.navRow}>
+            {currentSentence > 0 && (
+              <TouchableOpacity style={styles.prevButton} onPress={handlePrevSentence}>
+                <Text style={styles.prevButtonText}>⬅️</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.photoButton} onPress={handlePickPhoto}>
-                <Text style={styles.photoButtonEmoji}>🖼️</Text>
-                <Text style={styles.photoButtonText}>Galerie</Text>
+            )}
+            <TouchableOpacity
+              style={[styles.nextButton, !hasPlayedOnce && styles.nextButtonDisabled]}
+              onPress={handleNextSentence}
+              disabled={!hasPlayedOnce}
+            >
+              <Text style={styles.nextButtonText}>
+                {isLast
+                  ? '✅ Fertig – zum Foto!'
+                  : isMath
+                    ? '➡️ Nächste Aufgabe'
+                    : '➡️ Nächster Satz'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  // === PHASE: PHOTO ===
+  if (phase === 'photo') {
+    return (
+      <ScrollView style={styles.photoScroll} contentContainerStyle={styles.photoContainer}>
+        <StepIndicator currentPhase="photo" />
+
+        <TouchableOpacity style={styles.closeButton} onPress={() => navigation.goBack()}>
+          <Text style={styles.closeButtonText}>✕</Text>
+        </TouchableOpacity>
+
+        <View style={styles.photoIconWrap}>
+          <Text style={styles.photoIcon}>📸</Text>
+        </View>
+        <Text style={styles.photoTitle}>Geschafft!</Text>
+        <Text style={styles.photoSub}>Mach jetzt ein Foto von deiner Arbeit.</Text>
+
+        {/* Preview */}
+        {imageUri && (
+          <View style={styles.previewWrap}>
+            <Image source={{ uri: imageUri }} style={styles.previewImage} resizeMode="contain" />
+            <View style={styles.previewButtons}>
+              <TouchableOpacity
+                style={styles.retakeButton}
+                onPress={() => { setImageUri(null); setImageBase64(null); }}
+              >
+                <Text style={styles.retakeButtonText}>🔄 Nochmal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.checkButton} onPress={handleAnalyzePhoto}>
+                <Text style={styles.checkButtonText}>✨ Prüfen!</Text>
               </TouchableOpacity>
             </View>
           </View>
         )}
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.backButtonText}>Zurück</Text>
-        </TouchableOpacity>
-      </View>
+
+        {/* Buttons to take/pick photo */}
+        {!imageUri && (
+          <View style={styles.photoActions}>
+            {/* Tips */}
+            <View style={styles.tipsCard}>
+              <Text style={styles.tipsTitle}>💡 Tipps für ein gutes Foto:</Text>
+              <Text style={styles.tipLine}>☀️ Gutes Licht — kein Schatten auf dem Blatt</Text>
+              <Text style={styles.tipLine}>📐 Blatt gerade und ganz im Bild</Text>
+              <Text style={styles.tipLine}>📏 Nah genug — Schrift muss gut lesbar sein</Text>
+            </View>
+
+            <TouchableOpacity style={styles.cameraButton} onPress={handleTakePhoto}>
+              <Text style={styles.cameraButtonText}>📷 Foto aufnehmen</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.galleryButton} onPress={handlePickPhoto}>
+              <Text style={styles.galleryButtonText}>📁 Bild auswählen</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </ScrollView>
     );
   }
 
-  if (phase === 'submitting') {
+  // === PHASE: ANALYZING ===
+  if (phase === 'analyzing') {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#f59e0b" />
-        <Text style={styles.submittingText}>Wird ausgewertet...</Text>
+        <StepIndicator currentPhase="analyzing" />
+        <View style={styles.analyzingSpinner}>
+          <ActivityIndicator size="large" color="#f59e0b" />
+          <Text style={styles.analyzingEmoji}>🔍</Text>
+        </View>
+        <Text style={styles.analyzingTitle}>Ich prüfe deine Arbeit</Text>
+        <Text style={styles.analyzingSub}>Das dauert einen kleinen Moment ...</Text>
+        {imageUri && (
+          <Image
+            source={{ uri: imageUri }}
+            style={styles.analyzingPreview}
+            resizeMode="contain"
+          />
+        )}
       </View>
     );
   }
 
-  return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.practiceContent}>
-      {/* Progress */}
-      <View style={styles.progressRow}>
-        <Text style={styles.progressText}>
-          {isMath ? 'Aufgabe' : 'Satz'} {currentIndex + 1} von {sentences.length}
-        </Text>
-        <View style={styles.progressBar}>
-          <View
-            style={[styles.progressFill, { width: `${((currentIndex + 1) / sentences.length) * 100}%` }]}
-          />
-        </View>
-      </View>
-
-      {/* Replay Button */}
-      <TouchableOpacity
-        style={[styles.replayButton, isPlaying && styles.replayButtonPlaying]}
-        onPress={() => playAudio(currentSentence, isMath ? 1.0 : 0.85)}
-        disabled={isPlaying}
-      >
-        <Text style={styles.replayEmoji}>{isPlaying ? '🔊' : '🔈'}</Text>
-        <Text style={styles.replayText}>
-          {isPlaying ? 'Wird vorgelesen...' : 'Nochmal anhören'}
-        </Text>
-      </TouchableOpacity>
-
-      {/* Input */}
-      <TextInput
-        style={styles.textInput}
-        placeholder={isMath ? 'Deine Lösung...' : 'Schreibe den Satz...'}
-        placeholderTextColor="#9ca3af"
-        value={input}
-        onChangeText={setInput}
-        multiline={!isMath}
-        autoCorrect={false}
-        autoCapitalize={isMath ? 'none' : 'sentences'}
-        keyboardType={isMath ? 'default' : 'default'}
-      />
-
-      {/* Next / Finish */}
-      <TouchableOpacity
-        style={[styles.nextButton, !input.trim() && styles.nextButtonDisabled]}
-        onPress={handleNext}
-        disabled={!input.trim()}
-      >
-        <Text style={styles.nextButtonText}>
-          {currentIndex < sentences.length - 1
-            ? (isMath ? 'Nächste Aufgabe' : 'Nächster Satz')
-            : 'Fertig!'}
-        </Text>
-      </TouchableOpacity>
-    </ScrollView>
-  );
+  return null;
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fffbeb',
-  },
   center: {
     flex: 1,
     justifyContent: 'center',
@@ -352,158 +486,450 @@ const styles = StyleSheet.create({
     backgroundColor: '#fffbeb',
     padding: 24,
   },
-  practiceContent: {
-    padding: 20,
-    paddingTop: 16,
+
+  // === READY ===
+  readyIcon: {
+    width: 96,
+    height: 96,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  readyIconDiktat: {
+    backgroundColor: '#fef3c7',
+  },
+  readyIconMath: {
+    backgroundColor: '#dbeafe',
   },
   readyEmoji: {
-    fontSize: 64,
-    marginBottom: 16,
+    fontSize: 48,
   },
   readyTitle: {
     fontSize: 28,
     fontWeight: '800',
-    color: '#78350f',
+    color: '#374151',
     textAlign: 'center',
+    marginBottom: 4,
   },
   readyInfo: {
-    fontSize: 16,
-    color: '#92400e',
-    marginTop: 8,
-  },
-  readyHint: {
-    fontSize: 14,
+    fontSize: 18,
     color: '#9ca3af',
-    marginTop: 16,
-    textAlign: 'center',
-    paddingHorizontal: 32,
-  },
-  startButton: {
-    backgroundColor: '#f59e0b',
-    borderRadius: 16,
-    paddingHorizontal: 48,
-    paddingVertical: 16,
-    marginTop: 32,
-  },
-  startButtonText: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  backButton: {
-    marginTop: 16,
-    padding: 12,
-  },
-  backButtonText: {
-    color: '#92400e',
-    fontSize: 16,
-  },
-  submittingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#92400e',
-  },
-  progressRow: {
     marginBottom: 24,
   },
-  progressText: {
-    fontSize: 14,
-    color: '#92400e',
-    fontWeight: '600',
-    marginBottom: 8,
+  howItWorks: {
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    padding: 20,
+    marginBottom: 24,
+    width: '100%',
+    maxWidth: 340,
+    borderWidth: 1,
+    borderColor: '#f3f4f6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
   },
-  progressBar: {
-    height: 8,
+  howTitle: {
+    fontWeight: '700',
+    color: '#374151',
+    fontSize: 16,
+    marginBottom: 12,
+  },
+  howStep: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 10,
+  },
+  howIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
     backgroundColor: '#fef3c7',
-    borderRadius: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  howIcon: {
+    fontSize: 18,
+  },
+  howText: {
+    fontSize: 16,
+    color: '#4b5563',
+    flex: 1,
+  },
+  startButton: {
+    width: '100%',
+    maxWidth: 340,
+    paddingVertical: 22,
+    borderRadius: 24,
+    backgroundColor: '#f59e0b',
+    alignItems: 'center',
+    shadowColor: '#f59e0b',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  startButtonText: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#fff',
+  },
+  backLink: {
+    marginTop: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  backLinkText: {
+    fontSize: 24,
+    color: '#9ca3af',
+    fontWeight: '600',
+    marginTop: -2,
+  },
+
+  // === DICTATING ===
+  dictatingContainer: {
+    flex: 1,
+    backgroundColor: '#fffbeb',
+    paddingHorizontal: 24,
+    paddingTop: 48,
+    paddingBottom: 32,
+    justifyContent: 'space-between',
+  },
+  dictatingTop: {
+    width: '100%',
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  closeButtonText: {
+    fontSize: 16,
+    color: '#9ca3af',
+    fontWeight: '700',
+  },
+  progressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    marginTop: 8,
+  },
+  progressLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#9ca3af',
+  },
+  progressPercent: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#f59e0b',
+  },
+  progressTrack: {
+    height: 12,
+    backgroundColor: '#e5e7eb',
+    borderRadius: 6,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
     backgroundColor: '#f59e0b',
-    borderRadius: 4,
+    borderRadius: 6,
   },
-  replayButton: {
-    flexDirection: 'row',
+
+  dictatingCenter: {
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
-    gap: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    gap: 16,
   },
-  replayButtonPlaying: {
-    backgroundColor: '#fef3c7',
+  soundBars: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 6,
+    height: 80,
   },
-  replayEmoji: {
-    fontSize: 28,
+  soundBar: {
+    width: 12,
+    backgroundColor: '#f59e0b',
+    borderRadius: 6,
+    opacity: 0.8,
   },
-  replayText: {
-    fontSize: 16,
-    fontWeight: '600',
+  listeningText: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#d97706',
+  },
+  writeEmoji: {
+    fontSize: 64,
+  },
+  writeText: {
+    fontSize: 24,
+    fontWeight: '700',
     color: '#374151',
   },
-  textInput: {
-    backgroundColor: '#fff',
+  waitingText: {
+    fontSize: 20,
+    color: '#9ca3af',
+    marginTop: 12,
+  },
+
+  dictatingBottom: {
+    width: '100%',
+    gap: 12,
+  },
+  repeatButton: {
+    width: '100%',
+    paddingVertical: 20,
     borderRadius: 16,
-    padding: 16,
-    fontSize: 18,
+    backgroundColor: '#eff6ff',
     borderWidth: 2,
-    borderColor: '#fde68a',
-    color: '#1f2937',
-    minHeight: 80,
-    textAlignVertical: 'top',
-    marginBottom: 24,
+    borderColor: '#bfdbfe',
+    alignItems: 'center',
+  },
+  repeatButtonText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#2563eb',
+  },
+  navRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  prevButton: {
+    paddingVertical: 20,
+    paddingHorizontal: 24,
+    borderRadius: 16,
+    backgroundColor: '#f3f4f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  prevButtonText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#6b7280',
   },
   nextButton: {
-    backgroundColor: '#f59e0b',
+    flex: 1,
+    paddingVertical: 20,
     borderRadius: 16,
-    padding: 16,
+    backgroundColor: '#f59e0b',
     alignItems: 'center',
+    shadowColor: '#f59e0b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   nextButtonDisabled: {
     opacity: 0.4,
   },
   nextButtonText: {
-    color: '#fff',
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
+    color: '#fff',
   },
-  photoOptions: {
-    marginTop: 24,
+
+  // === PHOTO ===
+  photoScroll: {
+    flex: 1,
+    backgroundColor: '#fffbeb',
+  },
+  photoContainer: {
+    padding: 24,
+    paddingTop: 48,
     alignItems: 'center',
   },
-  photoHint: {
-    fontSize: 14,
-    color: '#9ca3af',
-    marginBottom: 12,
+  photoIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 24,
+    backgroundColor: '#dcfce7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  photoButtons: {
-    flexDirection: 'row',
+  photoIcon: {
+    fontSize: 36,
+  },
+  photoTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#374151',
+    marginBottom: 4,
+  },
+  photoSub: {
+    fontSize: 16,
+    color: '#9ca3af',
+    marginBottom: 24,
+  },
+  photoActions: {
+    width: '100%',
+    maxWidth: 340,
+    gap: 12,
+  },
+  tipsCard: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#fde68a',
+    marginBottom: 4,
+  },
+  tipsTitle: {
+    fontWeight: '700',
+    color: '#92400e',
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  tipLine: {
+    fontSize: 14,
+    color: '#b45309',
+    marginBottom: 4,
+  },
+  cameraButton: {
+    width: '100%',
+    paddingVertical: 22,
+    borderRadius: 16,
+    backgroundColor: '#f59e0b',
+    alignItems: 'center',
+    shadowColor: '#f59e0b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  cameraButtonText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  galleryButton: {
+    width: '100%',
+    paddingVertical: 20,
+    borderRadius: 16,
+    backgroundColor: '#eff6ff',
+    borderWidth: 2,
+    borderColor: '#bfdbfe',
+    alignItems: 'center',
+  },
+  galleryButtonText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#2563eb',
+  },
+
+  // Preview
+  previewWrap: {
+    width: '100%',
+    maxWidth: 400,
     gap: 16,
   },
-  photoButton: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderWidth: 2,
+  previewImage: {
+    width: '100%',
+    height: 300,
+    borderRadius: 24,
+    borderWidth: 4,
     borderColor: '#fde68a',
-    gap: 4,
+    backgroundColor: '#fff',
+    overflow: 'hidden',
   },
-  photoButtonEmoji: {
+  previewButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  retakeButton: {
+    flex: 1,
+    paddingVertical: 16,
+    borderRadius: 16,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+  },
+  retakeButtonText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#4b5563',
+  },
+  checkButton: {
+    flex: 1,
+    paddingVertical: 16,
+    borderRadius: 16,
+    backgroundColor: '#22c55e',
+    alignItems: 'center',
+    shadowColor: '#22c55e',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  checkButtonText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+  },
+
+  // === ANALYZING ===
+  analyzingSpinner: {
+    width: 96,
+    height: 96,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  analyzingEmoji: {
+    position: 'absolute',
+    fontSize: 36,
+  },
+  analyzingTitle: {
     fontSize: 24,
+    fontWeight: '800',
+    color: '#374151',
+    marginBottom: 8,
   },
-  photoButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#92400e',
+  analyzingSub: {
+    fontSize: 16,
+    color: '#9ca3af',
+  },
+  analyzingPreview: {
+    width: '80%',
+    height: 200,
+    borderRadius: 16,
+    marginTop: 32,
+    opacity: 0.5,
+    borderWidth: 2,
+    borderColor: '#e5e7eb',
   },
 });
