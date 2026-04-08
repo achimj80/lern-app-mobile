@@ -97,7 +97,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
     if (phase === 'dictating' && dictation && sentences.length > 0) {
       const timer = setTimeout(() => {
         playAudio(sentences[currentSentence], isMath ? 1.0 : 0.85);
-      }, 600);
+      }, 300);
       return () => clearTimeout(timer);
     }
   }, [phase, currentSentence]); // eslint-disable-line react-hooks/exhaustive-deps
