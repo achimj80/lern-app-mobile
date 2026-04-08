@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "lern-app-mobile",
-    "slug": "lern-app-mobile",
+    "name": "LernApp",
+    "slug": "lern-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,21 +10,22 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#fffbeb"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.lernapp.mobile",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Für Sprachaufnahmen bei Diktaten",
+        "NSCameraUsageDescription": "Zum Fotografieren von geschriebenen Diktaten"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#fffbeb"
       },
-      "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
+      "package": "com.lernapp.mobile"
     }
   }
 }
