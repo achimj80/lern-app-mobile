@@ -37,6 +37,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
   const [sessionId, setSessionId] = useState('');
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [imageUri, setImageUri] = useState<string | null>(null);
+  const [analyzeSeconds, setAnalyzeSeconds] = useState(0);
   const soundRef = useRef<Audio.Sound | null>(null);
 
   const isMath = dictation?.type === 'mathe';
@@ -127,6 +128,13 @@ export default function PracticeScreen({ navigation, route }: Props) {
       setHasPlayedOnce(true);
     }
   }, [isSpeaking]);
+
+  // Timer for analyzing phase
+  useEffect(() => {
+    if (phase !== 'analyzing') return;
+    const interval = setInterval(() => setAnalyzeSeconds(s => s + 1), 1000);
+    return () => clearInterval(interval);
+  }, [phase]);
 
   // Auto-play when entering dictating phase or moving to next sentence
   useEffect(() => {
@@ -225,6 +233,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
   const handleAnalyzePhoto = async () => {
     if (!imageBase64 || !dictation) return;
     setPhase('analyzing');
+    setAnalyzeSeconds(0);
 
     const totalWords = dictation.text.split(/\s+/).length;
     const imageDataUri = `data:image/jpeg;base64,${imageBase64}`;
@@ -233,6 +242,10 @@ export default function PracticeScreen({ navigation, route }: Props) {
       const token = await getAuthToken();
       const authHeader: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) authHeader['Authorization'] = `Bearer ${token}`;
+
+      // Timeout after 60s
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000);
 
       // Try combined AI analysis
       const res = await fetch(`${API_BASE}/api/analyze-dictation`, {
@@ -243,6 +256,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
           expectedText: dictation.text,
           type: dictation.type || 'diktat',
         }),
+        signal: controller.signal,
       });
 
       let recognizedText = '';
@@ -294,9 +308,14 @@ export default function PracticeScreen({ navigation, route }: Props) {
         errorTypes: [...new Set(errors.map(e => e.type))] as SpellingError['type'][],
       });
 
+      clearTimeout(timeout);
       navigation.replace('Result', { sessionId });
-    } catch {
-      Alert.alert('Fehler', 'Die Analyse hat leider nicht geklappt. Bitte versuche es nochmal.');
+    } catch (e) {
+      clearTimeout(timeout);
+      const msg = e instanceof Error && e.name === 'AbortError'
+        ? 'Die Analyse hat zu lange gedauert. Bitte versuche es nochmal.'
+        : 'Die Analyse hat leider nicht geklappt. Bitte versuche es nochmal.';
+      Alert.alert('Fehler', msg);
       setPhase('photo');
     }
   };
@@ -515,7 +534,14 @@ export default function PracticeScreen({ navigation, route }: Props) {
           <Text style={styles.analyzingEmoji}>🔍</Text>
         </View>
         <Text style={styles.analyzingTitle}>Ich prüfe deine Arbeit</Text>
-        <Text style={styles.analyzingSub}>Das dauert einen kleinen Moment ...</Text>
+        <Text style={styles.analyzingSub}>
+          {analyzeSeconds < 10
+            ? 'Das dauert einen kleinen Moment ...'
+            : analyzeSeconds < 30
+              ? 'Die KI liest deine Handschrift ...'
+              : 'Fast fertig, noch einen Moment ...'}
+        </Text>
+        <Text style={styles.analyzingTimer}>{analyzeSeconds}s</Text>
         {imageUri && (
           <Image
             source={{ uri: imageUri }}
@@ -954,6 +980,11 @@ const styles = StyleSheet.create({
   analyzingSub: {
     fontSize: 16,
     color: '#9ca3af',
+  },
+  analyzingTimer: {
+    fontSize: 14,
+    color: '#d1d5db',
+    marginTop: 8,
   },
   analyzingPreview: {
     width: '80%',
