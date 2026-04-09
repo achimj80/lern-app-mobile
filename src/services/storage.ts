@@ -12,6 +12,7 @@ export interface UserProfile {
 }
 
 let activeUserId: string | null = null;
+let authToken: string | null = null;
 let usersCache: UserProfile[] | null = null;
 
 async function fetchUsers(): Promise<UserProfile[]> {
@@ -35,9 +36,18 @@ export async function loadUsers(): Promise<UserProfile[]> {
   return fetchUsers();
 }
 
-export async function setActiveUser(userId: string): Promise<void> {
+export async function setActiveUser(userId: string, token?: string): Promise<void> {
   activeUserId = userId;
+  if (token) authToken = token;
   await AsyncStorage.setItem('activeUserId', userId);
+  if (token) await AsyncStorage.setItem('authToken', token);
+}
+
+export async function getAuthToken(): Promise<string | null> {
+  if (!authToken) {
+    authToken = await AsyncStorage.getItem('authToken');
+  }
+  return authToken;
 }
 
 export async function getActiveUser(): Promise<UserProfile | null> {
@@ -57,19 +67,30 @@ export async function getActiveUserId(): Promise<string | null> {
 
 export async function logout(): Promise<void> {
   activeUserId = null;
+  authToken = null;
   await AsyncStorage.removeItem('activeUserId');
+  await AsyncStorage.removeItem('authToken');
 }
 
 // === API helper ===
 
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = await getAuthToken();
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
+
 async function dbFetch(path: string, options?: RequestInit) {
-  const res = await fetch(`${API_BASE}/api/db${path}`, options);
+  const auth = await authHeaders();
+  const headers = { ...auth, ...options?.headers };
+  const res = await fetch(`${API_BASE}/api/db${path}`, { ...options, headers });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `DB request failed: ${res.status}`);
   }
   return res.json();
 }
+
+export { authHeaders };
 
 // === Sentence splitting ===
 

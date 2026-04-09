@@ -16,9 +16,9 @@ import {
   getAllDictations,
   getAllSessions,
   getProgress,
-  getDictation,
   UserProfile,
   invalidateDictationsCache,
+  getAuthToken,
 } from '../services/storage';
 import { calculateOverallStats, calculateStreak } from '../services/gamification';
 import LernMassband from '../components/LernMassband';
@@ -76,9 +76,13 @@ export default function ParentScreen({ navigation, user }: Props) {
   const handleSaveDictation = async () => {
     if (!title.trim() || !text.trim()) return;
     try {
+      const token = await getAuthToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       await fetch(`${API_BASE}/api/db`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           table: 'dictations',
           data: {
@@ -108,9 +112,13 @@ export default function ParentScreen({ navigation, user }: Props) {
   const handleGenerateMath = async () => {
     setIsGeneratingMath(true);
     try {
+      const token = await getAuthToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`${API_BASE}/api/generate-math`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ grade, count: mathCount, operation: mathOp, difficulty: mathDifficulty }),
       });
       const data = await res.json();
@@ -119,7 +127,7 @@ export default function ParentScreen({ navigation, user }: Props) {
       const opLabels: Record<string, string> = { addition: 'Plus', subtraction: 'Minus', multiplication: 'Mal', mixed: 'Gemischt' };
       await fetch(`${API_BASE}/api/db`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           table: 'dictations',
           data: {
@@ -153,9 +161,13 @@ export default function ParentScreen({ navigation, user }: Props) {
         text: 'Löschen',
         style: 'destructive',
         onPress: async () => {
+          const token = await getAuthToken();
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          if (token) headers['Authorization'] = `Bearer ${token}`;
+
           await fetch(`${API_BASE}/api/db`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ table: 'dictations', id, data: { archived: true } }),
           });
           invalidateDictationsCache();

@@ -15,7 +15,7 @@ import { RouteProp } from '@react-navigation/native';
 import { Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import { Dictation, DictationSession, SpellingError } from '../types';
-import { getDictation, createSession, updateSession, addProgressEntry } from '../services/storage';
+import { getDictation, createSession, updateSession, addProgressEntry, getAuthToken } from '../services/storage';
 import { API_BASE } from '../config';
 import { RootStackParamList } from '../navigation';
 import StepIndicator from '../components/StepIndicator';
@@ -70,9 +70,13 @@ export default function PracticeScreen({ navigation, route }: Props) {
     if (isSpeaking) return;
     setIsSpeaking(true);
     try {
+      const token = await getAuthToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`${API_BASE}/api/tts`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ text, rate }),
       });
       if (!res.ok) throw new Error('TTS failed');
@@ -226,10 +230,14 @@ export default function PracticeScreen({ navigation, route }: Props) {
     const imageDataUri = `data:image/jpeg;base64,${imageBase64}`;
 
     try {
+      const token = await getAuthToken();
+      const authHeader: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) authHeader['Authorization'] = `Bearer ${token}`;
+
       // Try combined AI analysis
       const res = await fetch(`${API_BASE}/api/analyze-dictation`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeader,
         body: JSON.stringify({
           image: imageDataUri,
           expectedText: dictation.text,
@@ -252,7 +260,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
       if (errors.length === 0 && !recognizedText) {
         const res2 = await fetch(`${API_BASE}/api/analyze-photo`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeader,
           body: JSON.stringify({
             image: imageBase64,
             expectedText: dictation.text,

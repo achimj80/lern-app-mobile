@@ -51,7 +51,7 @@ export default function LoginScreen({ onLogin }: Props) {
         return;
       }
       await loadUsers();
-      await setActiveUser(data.user.id);
+      await setActiveUser(data.user.id, data.token);
       onLogin(data.user);
     } catch {
       setError('Verbindungsfehler');
