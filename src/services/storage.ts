@@ -79,10 +79,22 @@ async function authHeaders(): Promise<Record<string, string>> {
   return token ? { 'Authorization': `Bearer ${token}` } : {};
 }
 
+// Callback for auth failure — set by App to trigger re-login
+let onAuthFailure: (() => void) | null = null;
+export function setOnAuthFailure(cb: () => void) {
+  onAuthFailure = cb;
+}
+
 async function dbFetch(path: string, options?: RequestInit) {
   const auth = await authHeaders();
   const headers = { ...auth, ...options?.headers };
   const res = await fetch(`${API_BASE}/api/db${path}`, { ...options, headers });
+  if (res.status === 401) {
+    // Token missing or expired — trigger re-login
+    await logout();
+    onAuthFailure?.();
+    throw new Error('Sitzung abgelaufen — bitte neu anmelden');
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `DB request failed: ${res.status}`);

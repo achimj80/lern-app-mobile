@@ -148,9 +148,14 @@ export default function PracticeScreen({ navigation, route }: Props) {
 
   const handleStart = async () => {
     if (!dictation) return;
-    const session = await createSession(dictation.id);
-    setSessionId(session.id);
-    setPhase('dictating');
+    try {
+      const session = await createSession(dictation.id);
+      setSessionId(session.id);
+      setPhase('dictating');
+    } catch (e) {
+      if (__DEV__) console.warn('createSession error:', e);
+      Alert.alert('Fehler', 'Die Übung konnte nicht gestartet werden. Bitte melde dich neu an.');
+    }
   };
 
   const stopCurrentAudio = () => {

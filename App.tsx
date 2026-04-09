@@ -6,7 +6,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { RootStackParamList } from './src/navigation';
-import { initApp, UserProfile } from './src/services/storage';
+import { initApp, UserProfile, setOnAuthFailure } from './src/services/storage';
 import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import PracticeScreen from './src/screens/PracticeScreen';
@@ -20,6 +20,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setOnAuthFailure(() => setUser(null));
     initApp().then((u) => {
       setUser(u);
       setLoading(false);
