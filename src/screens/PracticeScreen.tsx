@@ -8,14 +8,13 @@ import {
   Alert,
   Image,
   ScrollView,
-  Platform,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
-import { Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import { Dictation, DictationSession, SpellingError } from '../types';
 import { getDictation, createSession, updateSession, addProgressEntry, getAuthToken } from '../services/storage';
+import { speakSentence, stopSpeaking } from '../services/tts';
 import { API_BASE } from '../config';
 import { RootStackParamList } from '../navigation';
 import StepIndicator from '../components/StepIndicator';
@@ -38,20 +37,13 @@ export default function PracticeScreen({ navigation, route }: Props) {
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [analyzeSeconds, setAnalyzeSeconds] = useState(0);
-  const soundRef = useRef<Audio.Sound | null>(null);
 
   const isMath = dictation?.type === 'mathe';
   const sentences = dictation?.sentences || [];
 
   useEffect(() => {
     loadDictation();
-    return () => {
-      soundRef.current?.unloadAsync();
-      if (htmlAudioRef.current) {
-        htmlAudioRef.current.pause();
-        htmlAudioRef.current = null;
-      }
-    };
+    return () => { stopSpeaking(); };
   }, []);
 
   const loadDictation = async () => {
@@ -64,69 +56,17 @@ export default function PracticeScreen({ navigation, route }: Props) {
     setDictation(d);
   };
 
-  const htmlAudioRef = useRef<HTMLAudioElement | null>(null);
-
-  // Play a sentence via TTS API
+  // Play a sentence via TTS service (with chunking, like web app)
   const playAudio = useCallback(async (text: string, rate: number = 0.85) => {
     if (isSpeaking) return;
     setIsSpeaking(true);
     try {
-      const token = await getAuthToken();
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const res = await fetch(`${API_BASE}/api/tts`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ text, rate }),
-      });
-      if (!res.ok) throw new Error('TTS failed');
-      const data = await res.json();
-      const audioContent = data.audioContent || data.audio;
-      if (!audioContent) throw new Error('No audio content');
-
-      if (Platform.OS === 'web') {
-        // Web: use HTML5 Audio (expo-av doesn't handle data URIs well on web)
-        if (htmlAudioRef.current) {
-          htmlAudioRef.current.pause();
-          htmlAudioRef.current = null;
-        }
-        const audio = new window.Audio(`data:audio/mp3;base64,${audioContent}`);
-        htmlAudioRef.current = audio;
-        audio.onended = () => {
-          setIsSpeaking(false);
-          setHasPlayedOnce(true);
-          htmlAudioRef.current = null;
-        };
-        audio.onerror = () => {
-          setIsSpeaking(false);
-          setHasPlayedOnce(true);
-          htmlAudioRef.current = null;
-        };
-        await audio.play();
-      } else {
-        // Native: use expo-av
-        if (soundRef.current) {
-          await soundRef.current.unloadAsync();
-          soundRef.current = null;
-        }
-        const { sound } = await Audio.Sound.createAsync(
-          { uri: `data:audio/mp3;base64,${audioContent}` },
-          { shouldPlay: true }
-        );
-        soundRef.current = sound;
-        sound.setOnPlaybackStatusUpdate((status) => {
-          if ('didJustFinish' in status && status.didJustFinish) {
-            setIsSpeaking(false);
-            setHasPlayedOnce(true);
-          }
-        });
-      }
+      await speakSentence(text, rate);
     } catch (e) {
       if (__DEV__) console.warn('TTS error:', e);
-      setIsSpeaking(false);
-      setHasPlayedOnce(true);
     }
+    setIsSpeaking(false);
+    setHasPlayedOnce(true);
   }, [isSpeaking]);
 
   // Timer for analyzing phase
@@ -158,22 +98,9 @@ export default function PracticeScreen({ navigation, route }: Props) {
     }
   };
 
-  const stopCurrentAudio = () => {
-    if (Platform.OS === 'web') {
-      if (htmlAudioRef.current) {
-        htmlAudioRef.current.pause();
-        htmlAudioRef.current = null;
-      }
-    } else {
-      if (soundRef.current) {
-        soundRef.current.stopAsync().catch(() => {});
-      }
-    }
-  };
-
   const handleRepeat = () => {
     if (!dictation || currentSentence >= sentences.length) return;
-    stopCurrentAudio();
+    stopSpeaking();
     setIsSpeaking(false);
     setTimeout(() => {
       playAudio(sentences[currentSentence], isMath ? 1.0 : 0.85);
@@ -182,7 +109,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
 
   const handlePrevSentence = () => {
     if (currentSentence > 0) {
-      stopCurrentAudio();
+      stopSpeaking();
       setIsSpeaking(false);
       setHasPlayedOnce(false);
       setCurrentSentence(prev => prev - 1);
@@ -191,7 +118,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
 
   const handleNextSentence = () => {
     if (!dictation) return;
-    stopCurrentAudio();
+    stopSpeaking();
     setIsSpeaking(false);
 
     if (currentSentence < sentences.length - 1) {
@@ -204,7 +131,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
   };
 
   const handleClose = () => {
-    stopCurrentAudio();
+    stopSpeaking();
     navigation.goBack();
   };
 
@@ -243,14 +170,13 @@ export default function PracticeScreen({ navigation, route }: Props) {
     const totalWords = dictation.text.split(/\s+/).length;
     const imageDataUri = `data:image/jpeg;base64,${imageBase64}`;
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60000);
+
     try {
       const token = await getAuthToken();
       const authHeader: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) authHeader['Authorization'] = `Bearer ${token}`;
-
-      // Timeout after 60s
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 60000);
 
       // Try combined AI analysis
       const res = await fetch(`${API_BASE}/api/analyze-dictation`, {
