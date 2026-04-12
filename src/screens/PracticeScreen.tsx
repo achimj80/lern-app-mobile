@@ -12,7 +12,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import { Dictation, DictationSession, SpellingError } from '../types';
+import { Dictation, SpellingError } from '../types';
 import { getDictation, createSession, updateSession, addProgressEntry, getAuthToken } from '../services/storage';
 import { speakSentence, stopSpeaking } from '../services/tts';
 import { API_BASE } from '../config';
@@ -37,6 +37,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [analyzeSeconds, setAnalyzeSeconds] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   const isMath = dictation?.type === 'mathe';
   const sentences = dictation?.sentences || [];
@@ -171,6 +172,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
     const imageDataUri = `data:image/jpeg;base64,${imageBase64}`;
 
     const controller = new AbortController();
+    abortRef.current = controller;
     const timeout = setTimeout(() => controller.abort(), 60000);
 
     try {
@@ -178,7 +180,7 @@ export default function PracticeScreen({ navigation, route }: Props) {
       const authHeader: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) authHeader['Authorization'] = `Bearer ${token}`;
 
-      // Try combined AI analysis
+      // AI analysis (Sonnet)
       const res = await fetch(`${API_BASE}/api/analyze-dictation`, {
         method: 'POST',
         headers: authHeader,
@@ -190,34 +192,14 @@ export default function PracticeScreen({ navigation, route }: Props) {
         signal: controller.signal,
       });
 
-      let recognizedText = '';
-      let errors: SpellingError[] = [];
-
-      if (res.ok) {
-        const data = await res.json();
-        recognizedText = data.recognizedText || '';
-        if (Array.isArray(data.errors)) {
-          errors = data.errors;
-        }
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Analyse fehlgeschlagen (${res.status})`);
       }
 
-      // Fallback: try analyze-photo endpoint
-      if (errors.length === 0 && !recognizedText) {
-        const res2 = await fetch(`${API_BASE}/api/analyze-photo`, {
-          method: 'POST',
-          headers: authHeader,
-          body: JSON.stringify({
-            image: imageBase64,
-            expectedText: dictation.text,
-            type: dictation.type || 'diktat',
-          }),
-        });
-        if (res2.ok) {
-          const data2 = await res2.json();
-          recognizedText = data2.recognizedText || '';
-          errors = data2.errors || [];
-        }
-      }
+      const data = await res.json();
+      const recognizedText: string = data.recognizedText || '';
+      const errors: SpellingError[] = Array.isArray(data.errors) ? data.errors : [];
 
       const score = Math.max(0, Math.round(((totalWords - errors.length) / totalWords) * 100));
 
@@ -473,6 +455,19 @@ export default function PracticeScreen({ navigation, route }: Props) {
               : 'Fast fertig, noch einen Moment ...'}
         </Text>
         <Text style={styles.analyzingTimer}>{analyzeSeconds}s</Text>
+
+        {analyzeSeconds >= 15 && (
+          <TouchableOpacity
+            style={styles.analyzingCancel}
+            onPress={() => {
+              abortRef.current?.abort();
+              setPhase('photo');
+            }}
+          >
+            <Text style={styles.analyzingCancelText}>Abbrechen</Text>
+          </TouchableOpacity>
+        )}
+
         {imageUri && (
           <Image
             source={{ uri: imageUri }}
@@ -916,6 +911,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#d1d5db',
     marginTop: 8,
+  },
+  analyzingCancel: {
+    marginTop: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    backgroundColor: '#f3f4f6',
+  },
+  analyzingCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#9ca3af',
   },
   analyzingPreview: {
     width: '80%',
